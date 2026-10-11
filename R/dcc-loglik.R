@@ -8,7 +8,9 @@
 #' 似然在 C++ 完成;逐观测返回供三明治标准误使用。
 #'
 #' @param param Parameter vector in [dcc_par_index()] order.
-#' @param data Data bundle as in [build_longrun_corr()].
+#' @param data Data bundle as in [build_longrun_corr()]; the optional field
+#'   `t0` sets the recursion start (first `t0` days are placeholders with
+#'   zero likelihood). Without `t0` the start is `K_c` (dccmidas convention).
 #'
 #' @return Numeric vector of per-observation log-likelihood contributions.
 #' @keywords internal
@@ -16,7 +18,10 @@ dcc_midas_loglik <- function(param, data) {
   a <- param[data$idx$a]
   b <- param[data$idx$b]
   R_t_bar <- build_longrun_corr(param, data)
-  as.numeric(midas_ll_rcpp(data$TT, data$n_assets, data$K_c, a, b, R_t_bar, data$res))
+  # midas_ll_rcpp uses its third argument only as the 0-based loop start
+  # midas_ll_rcpp 的第三个参数只作循环起点(0 基)使用
+  t0 <- data$t0 %||% data$K_c
+  as.numeric(midas_ll_rcpp(data$TT, data$n_assets, t0, a, b, R_t_bar, data$res))
 }
 
 #' Per-observation log-likelihoods of the non-MIDAS correlation models

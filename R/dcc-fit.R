@@ -171,8 +171,26 @@ univ_stage <- function(r_al, univariate, distribution, out_of_sample,
 #'   (columns in `dcc_par_index()` order); first-step starts go through
 #'   `univariate_args$start_matrix`. 注:control$start_matrix 只作用于
 #'   第二步,第一步起点经 univariate_args$start_matrix 注入。
+#' @param burn_in Where the correlation recursion starts.
+#'   `"dccmidas"` (default) follows the dccmidas package and the legacy
+#'   script: the first `K_c` days are placeholders (for cDCC/aDCC/DECO, the
+#'   first day, or the first `K_c` days if `K_c` is given). `"exact"` starts
+#'   as soon as every input of the long-run correlation is genuinely
+#'   available: after `N_c + K_c` days when the realized-correlation term is
+#'   present (its first `N_c` daily correlations are zero-filled), after one
+#'   day otherwise (monthly covariates already carry full history after
+#'   calendar alignment, and `K_c` counts months there, not days).
+#'   相关递推起点:"dccmidas"(默认,与 dccmidas 包及旧脚本一致)前 K_c 天
+#'   为占位;"exact" 在长期相关全部输入真正可用时才开始(含 RC 时跳过
+#'   N_c+K_c 天,否则只跳 1 天)。
 #'
-#' @return An object of class `dcc_fit`; see [summary.dcc_fit()].
+#' @return An object of class `dcc_fit`; see [summary.dcc_fit()]. The
+#'   integer field `burn_in` gives the number of leading in-sample days whose
+#'   `R_t` / `H_t` / `R_t_bar` slices are placeholders (identity correlation,
+#'   `H_t` equal to the residual covariance, zero likelihood contribution);
+#'   drop them before computing conditional betas or forecast losses, e.g.
+#'   `fit$H_t[, , -seq_len(fit$burn_in)]`.
+#'   字段 burn_in 为样本内开头占位天数,下游计算前应剔除。
 #' @examples
 #' \donttest{
 #' # Industry vs market conditional correlation, long-run correlation
@@ -201,13 +219,15 @@ fit_dcc <- function(returns,
                     lag_fun = c("Beta", "Almon"),
                     period = c("monthly", "quarterly"),
                     out_of_sample = NULL, vol_proxy = NULL,
-                    n_starts = 100, seed = NULL, control = list()) {
+                    n_starts = 100, seed = NULL, control = list(),
+                    burn_in = c("dccmidas", "exact")) {
 
   univariate   <- match.arg(univariate)
   correlation  <- match.arg(correlation)
   distribution <- match.arg(distribution)
   lag_fun      <- match.arg(lag_fun)
   period       <- match.arg(period)
+  burn_in      <- match.arg(burn_in)
 
   ############################# validation / 输入校验
   assert_xts(returns)
@@ -279,6 +299,35 @@ fit_dcc <- function(returns,
   full_days <- as.Date(days)
   if (!is.null(vol_proxy)) vol_proxy <- vol_proxy[days]
 
+  ############################# burn-in / 烧入期
+  # t0 = number of leading placeholder days = 0-based start index of the
+  # correlation recursion (day t0 + 1 is the first estimated day).
+  # t0 = 开头占位天数 = 相关递推的 0 基起始下标(第 t0+1 天起真正估计)。
+  #   DCC-MIDAS, "dccmidas": K_c                      (dccmidas convention)
+  #   DCC-MIDAS, "exact"   : N_c + K_c with RC term   (first R_bar built from
+  #                          K_c genuine, non-zero-filled daily C_t), else 1
+  #   cDCC/aDCC/DECO       : the C++ kernels start after K_c days, or after
+  #                          1 day when K_c is NULL; "exact" forces NULL.
+  has_rc   <- isTRUE(rc) && is_midas_corr
+  K_c_kern <- if (!is_midas_corr && burn_in == "exact") NULL else K_c
+  t0 <- if (is_midas_corr) {
+    if (burn_in == "dccmidas") as.integer(K_c)
+    else if (has_rc) as.integer(N_c + K_c)
+    else 1L
+  } else {
+    if (is.null(K_c_kern)) 1L else as.integer(K_c_kern)
+  }
+  if (t0 < 1L) {
+    stop("The correlation recursion needs at least one lag: use K_c >= 1.",
+         call. = FALSE)
+  }
+  if (t0 >= n_in - 1L) {
+    stop(sprintf(paste0("burn_in = \"%s\" leaves no in-sample days to estimate ",
+                        "the correlation step (burn-in %d days, in-sample %d days). ",
+                        "Reduce N_c / K_c or use a longer sample."),
+                 burn_in, t0, n_in), call. = FALSE)
+  }
+
   ############################# first step / 第一步:单变量
   # control$start_matrix targets the SECOND (correlation) step only: its
   # columns follow dcc_par_index() and would not match the univariate
@@ -310,10 +359,16 @@ fit_dcc <- function(returns,
   })
   D_mat_full <- build_break_dummies(full_days, corr_break_dates)
 
+  # K_c in the bundle drives the MIDAS lag windows (DCC-MIDAS) or the C++
+  # start offset (cDCC/aDCC/DECO); t0 drives the DCC-MIDAS recursion start.
+  # 数据束中 K_c 决定 MIDAS 滞后窗口(或非 MIDAS 模型的 C++ 起点),
+  # t0 决定 DCC-MIDAS 递推起点。
   dcc_bundle <- function(cols, idx = NULL) {
     list(res = eps_full[cols, , drop = FALSE], n_assets = N_a,
-         TT = length(cols), K_c = K_c, N_c = N_c,
-         rc = isTRUE(rc) && is_midas_corr,
+         TT = length(cols),
+         K_c = if (is_midas_corr) K_c else K_c_kern,
+         N_c = N_c, t0 = t0,
+         rc = has_rc,
          X_mats = lapply(X_mats_full, function(m) m[, cols, drop = FALSE]),
          D_mat = D_mat_full[, cols, drop = FALSE],
          lag_fun = lag_fun, idx = idx)
@@ -393,16 +448,18 @@ fit_dcc <- function(returns,
     R_t = slice3(mats$R_t, in_ix),
     R_t_bar = slice3(mats$R_t_bar, in_ix),
     Days = days[in_ix],
+    burn_in = t0,
     u_llk = st1$u_loglik,
     c_llk = stats::logLik(m_est),
     u_Inf_criteria = st1$u_inf,
     c_inf_criteria = inf_criteria(m_est),
     Inf_criteria_2step = inf_criteria_2step(st1$u_est, m_est),
-    spec = list(correlation = correlation, rc = isTRUE(rc) && is_midas_corr,
+    spec = list(correlation = correlation, rc = has_rc,
                 corr_X = names(corr_X), K_c = K_c, N_c = N_c,
                 corr_break_dates = corr_break_dates,
                 distribution = distribution, lag_fun = lag_fun,
-                period = period, n_starts = n_starts, seed = seed),
+                period = period, n_starts = n_starts, seed = seed,
+                burn_in = burn_in),
     maxlik = m_est
   )
 

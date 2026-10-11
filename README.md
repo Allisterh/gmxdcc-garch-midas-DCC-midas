@@ -91,6 +91,11 @@ languages:
 - English: [docs/gmxdcc-manual-en.md](docs/gmxdcc-manual-en.md)
 - 中文: [docs/gmxdcc-manual.md](docs/gmxdcc-manual.md)
 
+Upgrading an existing project? See
+[docs/upgrade-notes.md](docs/upgrade-notes.md) (0.1.0 → 0.1.1: no code
+changes needed; how to drop placeholder burn-in days; how to pin the old
+version).
+
 ## Migrating from the legacy research script
 
 | Legacy model string | New arguments |

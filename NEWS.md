@@ -1,3 +1,27 @@
+# gmxdcc 0.1.1
+
+* New `burn_in` argument of `fit_dcc()` controlling where the correlation
+  recursion starts:
+  - `"dccmidas"` (default) keeps the convention of the dccmidas package and
+    the legacy script — **results are identical to 0.1.0**. For DCC-MIDAS
+    the first `K_c` days are placeholders; for cDCC/aDCC/DECO the first day
+    (or the first `K_c` days if `K_c` is supplied).
+  - `"exact"` starts as soon as every input of the long-run correlation is
+    genuinely available: after `N_c + K_c` days when the realized-correlation
+    term is present (its first `N_c` daily correlations are zero-filled, so
+    under `"dccmidas"` the early long-run correlations are partly built from
+    zeros), after one day otherwise (monthly covariates are already complete
+    after calendar alignment; `K_c` counts months there, not days).
+* New output field `burn_in` (integer): the number of leading in-sample days
+  whose `R_t` / `H_t` / `R_t_bar` slices are placeholders — identity
+  correlation, `H_t` equal to the covariance of the *standardized* residuals
+  (not on the return scale), zero likelihood contribution. Drop them before
+  computing conditional betas or forecast losses:
+  `fit$H_t[, , -seq_len(fit$burn_in)]`. Arrays keep their full length, as
+  before. The chosen option is recorded in `fit$spec$burn_in`, and
+  `summary()` prints a burn-in line.
+* Implemented on the R side only; the C++ kernels are unchanged.
+
 # gmxdcc 0.1.0 (updates since the initial GitHub release)
 
 * Fixed the routing of optimizer start-value injection in `fit_dcc()`:

@@ -9,7 +9,9 @@ dcc_midas_loglik(param, data)
 \arguments{
 \item{param}{Parameter vector in \code{\link[=dcc_par_index]{dcc_par_index()}} order.}
 
-\item{data}{Data bundle as in \code{\link[=build_longrun_corr]{build_longrun_corr()}}.}
+\item{data}{Data bundle as in \code{\link[=build_longrun_corr]{build_longrun_corr()}}; the optional field
+\code{t0} sets the recursion start (first \code{t0} days are placeholders with
+zero likelihood). Without \code{t0} the start is \code{K_c} (dccmidas convention).}
 }
 \value{
 Numeric vector of per-observation log-likelihood contributions.

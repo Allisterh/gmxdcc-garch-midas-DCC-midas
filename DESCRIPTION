@@ -2,7 +2,7 @@ Package: gmxdcc
 Type: Package
 Title: GARCH-MIDAS and DCC-MIDAS Models with Exogenous Covariates and
     Structural Breaks
-Version: 0.1.0
+Version: 0.1.1
 Authors@R:
     person("JIANCHANG", "LYU", email = "rokenshotlib124@gmail.com",
            role = c("aut", "cre"))

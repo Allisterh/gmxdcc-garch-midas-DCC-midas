@@ -1,8 +1,9 @@
 ^dev$
+^test20260704\.RData$
 ^.*\.Rproj$
 ^\.Rproj\.user$
 ^\.github$
+^\.claude$
 ^\.gitignore$
 ^cran-comments\.md$
-^history\.txt$
 ^docs$

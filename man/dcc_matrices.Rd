@@ -12,7 +12,9 @@ dcc_matrices(param, model, data, D_t, S_in = NULL, N_in = NULL)
 \item{model}{One of \code{"cDCC"}, \code{"aDCC"}, \code{"DECO"}, \code{"DCC-MIDAS"}.}
 
 \item{data}{DCC data bundle (see \code{\link[=build_longrun_corr]{build_longrun_corr()}}); for the
-non-MIDAS models only \code{res} and \code{K_c} are used.}
+non-MIDAS models only \code{res} and \code{K_c} are used. For DCC-MIDAS the
+optional field \code{t0} sets the recursion start (default \code{K_c}); the
+first \code{t0} slices keep their placeholder values.}
 
 \item{D_t}{\verb{N x N x TT} cube of conditional-standard-deviation diagonal
 matrices.}

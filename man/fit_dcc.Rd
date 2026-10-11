@@ -21,7 +21,8 @@ fit_dcc(
   vol_proxy = NULL,
   n_starts = 100,
   seed = NULL,
-  control = list()
+  control = list(),
+  burn_in = c("dccmidas", "exact")
 )
 }
 \arguments{
@@ -60,9 +61,28 @@ Exception: \code{control$start_matrix} targets the correlation step only
 (columns in \code{dcc_par_index()} order); first-step starts go through
 \code{univariate_args$start_matrix}. 注:control$start_matrix 只作用于
 第二步,第一步起点经 univariate_args$start_matrix 注入。}
+
+\item{burn_in}{Where the correlation recursion starts.
+\code{"dccmidas"} (default) follows the dccmidas package and the legacy
+script: the first \code{K_c} days are placeholders (for cDCC/aDCC/DECO, the
+first day, or the first \code{K_c} days if \code{K_c} is given). \code{"exact"} starts
+as soon as every input of the long-run correlation is genuinely
+available: after \code{N_c + K_c} days when the realized-correlation term is
+present (its first \code{N_c} daily correlations are zero-filled), after one
+day otherwise (monthly covariates already carry full history after
+calendar alignment, and \code{K_c} counts months there, not days).
+相关递推起点:"dccmidas"(默认,与 dccmidas 包及旧脚本一致)前 K_c 天
+为占位;"exact" 在长期相关全部输入真正可用时才开始(含 RC 时跳过
+N_c+K_c 天,否则只跳 1 天)。}
 }
 \value{
-An object of class \code{dcc_fit}; see \code{\link[=summary.dcc_fit]{summary.dcc_fit()}}.
+An object of class \code{dcc_fit}; see \code{\link[=summary.dcc_fit]{summary.dcc_fit()}}. The
+integer field \code{burn_in} gives the number of leading in-sample days whose
+\code{R_t} / \code{H_t} / \code{R_t_bar} slices are placeholders (identity correlation,
+\code{H_t} equal to the residual covariance, zero likelihood contribution);
+drop them before computing conditional betas or forecast losses, e.g.
+\code{fit$H_t[, , -seq_len(fit$burn_in)]}.
+字段 burn_in 为样本内开头占位天数,下游计算前应剔除。
 }
 \description{
 Two-step QMLE: univariate volatility models per asset (rugarch family or

@@ -15,7 +15,12 @@ summary.dcc_fit <- function(object, ...) {
 
   cat("\nUnivariate model:", object$model,
       "  |  Correlation model:", object$mult_model, "\n")
-  cat("Obs.:", paste(object$obs, ".", sep = ""), "Sample Period:", Period, "\n\n")
+  cat("Obs.:", paste(object$obs, ".", sep = ""), "Sample Period:", Period, "\n")
+  if (!is.null(object$burn_in)) {
+    cat(sprintf("Burn-in: first %d in-sample days are placeholders (burn_in = \"%s\")\n",
+                object$burn_in, object$spec$burn_in %||% "dccmidas"))
+  }
+  cat("\n")
 
   for (i in seq_along(object$est_univ_model)) {
     cat("--- Asset:", object$assets[i], "---\n")

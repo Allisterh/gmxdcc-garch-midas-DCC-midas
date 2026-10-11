@@ -3,23 +3,7 @@
 # for the DCC-MIDAS path.
 # 关卡 7b:fit_dcc 端到端——cDCC 金标准对照 + DCC-MIDAS 结构与热启动检验。
 
-# Correlated 2-asset panel with GARCH dynamics in the first column.
-# 两资产相关面板,第一列含真实 GARCH 动态。
-dcc_panel <- local({
-  cache <- NULL
-  function() {
-    if (!is.null(cache)) return(cache)
-    d <- sim_data()
-    set.seed(505)
-    r1 <- d$r_dgp
-    z  <- xts::xts(rnorm(length(r1), 0, 0.8), order.by = zoo::index(r1))
-    r2 <- 0.6 * r1 + z                     # correlated second asset
-    panel <- xts::merge.xts(A1 = r1, A2 = r2)
-    colnames(panel) <- c("A1", "A2")
-    cache <<- list(panel = panel, macro = d$macro)
-    cache
-  }
-})
+# dcc_panel() lives in helper-panel.R / dcc_panel() 定义见 helper-panel.R
 
 test_that("fit_dcc with sGARCH + cDCC reproduces the legacy two-step fit", {
   skip_on_cran()

@@ -1,6 +1,6 @@
 # gmxdcc Reference Manual
 
-**Package:** gmxdcc 0.1.0 — GARCH-MIDAS and DCC-MIDAS Models with Exogenous
+**Package:** gmxdcc 0.1.1 — GARCH-MIDAS and DCC-MIDAS Models with Exogenous
 Covariates and Structural Breaks
 
 This document plays the role of a CRAN reference manual: it explains, function
@@ -231,7 +231,8 @@ fit_dcc(returns,
         distribution = c("norm", "std"), lag_fun = c("Beta", "Almon"),
         period = c("monthly", "quarterly"),
         out_of_sample = NULL, vol_proxy = NULL,
-        n_starts = 100, seed = NULL, control = list())
+        n_starts = 100, seed = NULL, control = list(),
+        burn_in = c("dccmidas", "exact"))
 ```
 
 ### Arguments, one by one
@@ -247,6 +248,7 @@ fit_dcc(returns,
 | `corr_X` | NULL | Low-frequency covariates of the long-run correlation (list, same design as `X`) |
 | `K_c` | NULL | Correlation-side MIDAS lag order (scalar); required for DCC-MIDAS. **Keep it NULL for cDCC/aDCC/DECO** — the C++ kernels apply their own legacy default offset to NULL, and passing a value shifts the recursion start |
 | `corr_break_dates` | NULL | Break dates for the long-run correlation (piecewise $m,\theta$; form 3 in 2.2) |
+| `burn_in` | "dccmidas" | Where the correlation recursion starts (new in 0.1.1, see "Burn-in" below). The default follows the dccmidas convention and reproduces earlier results exactly; `"exact"` starts once every input of the long-run correlation is genuinely available |
 | others | — | Same meaning as in `fit_garch_midas()`; `control$start_matrix` targets **the second step only** (columns in `dcc_par_index()` order) |
 
 ### Second-step parameter ordering (`dcc_par_index()`)
@@ -266,7 +268,43 @@ With $P = N(N-1)/2$ asset pairs and $R = 1+B$ regimes:
 | `eps_t`, `D_t` | Standardized residuals, conditional-SD cubes |
 | `H_t`, `R_t`, `R_t_bar` | Conditional covariance / correlation / long-run correlation arrays ($N\times N\times T$) |
 | `*_oos` fields | Out-of-sample slices (warm-started filter) |
+| `burn_in` | Number of leading in-sample **placeholder days** (integer); drop them before downstream use (see below) |
 | `u_llk`, `c_llk`, `Inf_criteria_2step` | Step likelihoods and system AIC/BIC |
+
+### Burn-in and placeholder days
+
+The correlation recursion needs a start-up period. Output arrays are **not
+truncated**: their leading slices keep placeholder values, so their length
+always equals the number of sample days. On placeholder days $R_t = I$
+(zero correlation), $H_t$ equals the covariance of the *standardized*
+residuals (not on the return scale — orders of magnitude off from regular
+$H_t$ values), and the likelihood contribution is zero.
+
+Number of placeholder days, `fit$burn_in`:
+
+| Model | `burn_in = "dccmidas"` (default) | `burn_in = "exact"` |
+|---|---|---|
+| DCC-MIDAS | $K_c$ | with RC term: $N_c + K_c$; covariates only: 1 |
+| cDCC / aDCC / DECO | 1 ($K_c$ if `K_c` is supplied) | 1 |
+
+Rationale for `"exact"`: the RC term's $C_t$ needs an $N_c$-day window and is
+zero-filled for the first $N_c$ days; the long-run correlation
+$\bar R_t=\sum_{k=1}^{K_c}\varphi_k C_{t-k}$ needs $K_c$ genuine values of
+$C$ on top, so the first $\bar R_t$ built entirely from real data appears on
+day $N_c+K_c+1$. Under the default convention, $\bar R_t$ on days $K_c+1$ to
+$N_c+K_c$ is partly built from zero-filled $C$. With covariates only, `K_c`
+counts **months**; after calendar alignment the monthly lags are complete
+from day 1, so only one day is skipped (the recursion uses
+$\varepsilon_{t-1}$).
+
+Downstream use (conditional beta example):
+
+```r
+b    <- fit$burn_in
+keep <- (b + 1):dim(fit$H_t)[3]
+beta <- fit$H_t[1, 2, keep] / fit$H_t[2, 2, keep]   # asset 1 on asset 2 (market)
+days <- fit$Days[keep]
+```
 
 ### Example
 
@@ -455,5 +493,5 @@ at fixed parameters to 1e-12).
 
 ---
 
-*This manual tracks package version 0.1.0; for the authoritative signatures
+*This manual tracks package version 0.1.1; for the authoritative signatures
 see the help pages `?fit_garch_midas` and `?fit_dcc`.*

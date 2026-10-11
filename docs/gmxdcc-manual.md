@@ -1,6 +1,6 @@
 # gmxdcc 参考手册 / Reference Manual
 
-**Package:** gmxdcc 0.1.0 — GARCH-MIDAS and DCC-MIDAS Models with Exogenous
+**Package:** gmxdcc 0.1.1 — GARCH-MIDAS and DCC-MIDAS Models with Exogenous
 Covariates and Structural Breaks
 
 本手册对应 CRAN 参考手册的角色:逐函数解说参数的设计方法与含义,附完整数学模型与可运行示例(全部基于包内置数据)。
@@ -201,7 +201,8 @@ fit_dcc(returns,
         distribution = c("norm", "std"), lag_fun = c("Beta", "Almon"),
         period = c("monthly", "quarterly"),
         out_of_sample = NULL, vol_proxy = NULL,
-        n_starts = 100, seed = NULL, control = list())
+        n_starts = 100, seed = NULL, control = list(),
+        burn_in = c("dccmidas", "exact"))
 ```
 
 ### 参数逐一解说
@@ -217,6 +218,7 @@ fit_dcc(returns,
 | `corr_X` | NULL | 长期相关的低频协变量(列表,同 `X` 的设计) |
 | `K_c` | NULL | 相关侧 MIDAS 滞后阶数(标量);DCC-MIDAS 必填。**cDCC/aDCC/DECO 请保持 NULL**——C++ 内核对 NULL 有自己的旧默认偏移,显式传值会移动递推起点 |
 | `corr_break_dates` | NULL | 长期相关的突变日期(分段 $m,\theta$;见 2.2 第 3 式) |
+| `burn_in` | "dccmidas" | 相关递推从哪天开始(0.1.1 新增,见下方"烧入期"小节)。默认沿用 dccmidas 包约定,数值与旧版完全一致;`"exact"` 在长期相关的全部输入真正可用时才开始 |
 | 其余 | — | 与 `fit_garch_midas()` 同义;`control$start_matrix` **只作用于第二步**(列序按 `dcc_par_index()`) |
 
 ### 第二步参数排序(`dcc_par_index()`,与旧脚本各配置逐一吻合)
@@ -236,7 +238,30 @@ fit_dcc(returns,
 | `eps_t`, `D_t` | 标准化残差、条件SD对角阵序列 |
 | `H_t`, `R_t`, `R_t_bar` | 条件协方差/相关/长期相关阵($N\times N\times T$) |
 | `*_oos` 系列 | 样本外切片(热启动滤波所得) |
+| `burn_in` | 样本内开头的**占位天数**(整数),下游计算前应剔除(见下方小节) |
 | `u_llk`, `c_llk`, `Inf_criteria_2step` | 两步似然与系统 AIC/BIC |
+
+### 烧入期(burn-in)与占位天
+
+相关递推需要一段起始期。输出数组**不截短**,而是在开头保留占位值,长度始终等于样本天数。占位天里:$R_t = I$(相关恒为 0)、$H_t$ 等于**标准化残差**的协方差(不是收益尺度,量级与正常的 $H_t$ 相差几个数量级)、似然贡献为 0。
+
+占位天数 `fit$burn_in` 的取值:
+
+| 模型 | `burn_in = "dccmidas"`(默认) | `burn_in = "exact"` |
+|---|---|---|
+| DCC-MIDAS | $K_c$ | 含 RC 项:$N_c + K_c$;仅 X 协变量:1 |
+| cDCC / aDCC / DECO | 1(若给了 `K_c` 则为 $K_c$) | 1 |
+
+`"exact"` 的依据:RC 项的 $C_t$ 需要 $N_c$ 天窗口,前 $N_c$ 天填 0;长期相关 $\bar R_t=\sum_{k=1}^{K_c}\varphi_k C_{t-k}$ 再需要 $K_c$ 个真实的 $C$,因此第一个完全由真实数据构成的 $\bar R_t$ 出现在第 $N_c+K_c+1$ 天。默认约定下第 $K_c+1$ 到 $N_c+K_c$ 天的 $\bar R_t$ 部分由填 0 的 $C$ 构成。纯 X 协变量时 `K_c` 的单位是**月**,日历对齐后月度滞后从第 1 天起就完整,只需跳过 1 天(递推要用 $\varepsilon_{t-1}$)。
+
+下游使用(条件 beta 示例):
+
+```r
+b    <- fit$burn_in
+keep <- (b + 1):dim(fit$H_t)[3]
+beta <- fit$H_t[1, 2, keep] / fit$H_t[2, 2, keep]   # 资产 1 对资产 2(市场)
+days <- fit$Days[keep]
+```
 
 ### 示例
 
@@ -390,4 +415,4 @@ $$\mathrm{MSE\%} = 100\cdot\overline{(h - h^{proxy})^2},\qquad \mathrm{QLIKE} = 
 
 ---
 
-*本手册与包版本 0.1.0 同步;函数签名以 `?fit_garch_midas`、`?fit_dcc` 的最新帮助页为准。*
+*本手册与包版本 0.1.1 同步;函数签名以 `?fit_garch_midas`、`?fit_dcc` 的最新帮助页为准。*

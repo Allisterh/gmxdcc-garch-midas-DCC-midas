@@ -16,7 +16,9 @@
 #' @param param Estimated parameter vector.
 #' @param model One of `"cDCC"`, `"aDCC"`, `"DECO"`, `"DCC-MIDAS"`.
 #' @param data DCC data bundle (see [build_longrun_corr()]); for the
-#'   non-MIDAS models only `res` and `K_c` are used.
+#'   non-MIDAS models only `res` and `K_c` are used. For DCC-MIDAS the
+#'   optional field `t0` sets the recursion start (default `K_c`); the
+#'   first `t0` slices keep their placeholder values.
 #' @param D_t `N x N x TT` cube of conditional-standard-deviation diagonal
 #'   matrices.
 #' @param S_in Optional unconditional covariance target (in-sample).
@@ -39,7 +41,8 @@ dcc_matrices <- function(param, model, data, D_t, S_in = NULL, N_in = NULL) {
 
   ## --- DCC-MIDAS: R-side recursion, ported verbatim from the legacy loop ---
   ## DCC-MIDAS:R 端递推,逐行移植旧脚本
-  N <- data$n_assets; TT <- data$TT; K_c <- data$K_c
+  N <- data$n_assets; TT <- data$TT
+  t0 <- data$t0 %||% data$K_c   # placeholder days / 占位天数
   a <- param[data$idx$a]; b <- param[data$idx$b]
 
   R_t_bar <- build_longrun_corr(param, data)
@@ -50,7 +53,7 @@ dcc_matrices <- function(param, model, data, D_t, S_in = NULL, N_in = NULL) {
   R_t <- array(diag(rep(1, N)), dim = c(N, N, TT))
   H_t <- array(S, dim = c(N, N, TT))
 
-  for (tt in (K_c + 1):TT) {
+  for (tt in (t0 + 1):TT) {
     Q_t[, , tt] <- (1 - a - b) * R_t_bar[, , tt] +
       a * tcrossprod(data$res[tt - 1, ]) + b * Q_t[, , tt - 1]
 
