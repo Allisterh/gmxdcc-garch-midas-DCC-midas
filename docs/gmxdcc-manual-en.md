@@ -146,6 +146,46 @@ with $H$ the numerical Hessian and $s_t$ the per-observation scores (from
 almost surely misspecified, hence plain Hessian standard errors are not used
 (Bollerslev & Wooldridge, 1992).
 
+**Analytic score and expected information (new in 0.1.2, optional).** Both
+per-observation scores have closed-form recursions (the univariate GARCH
+recursion of Fiorentini, Calzolari & Panattoni, 1996, plus closed-form
+derivatives of the long-run component $\tau_t$ with respect to
+$(m,\theta,\omega)$; for the correlation step, the derivative of Engle's
+(2002) $Q_t$ recursion). The package exports them as `gm_score()` and
+`dcc_midas_score()` (a $T\times p$ score matrix) and `gm_expected_info()`,
+`dcc_expected_info()` (the expected information
+$\mathcal I=\sum_t \tfrac12 v_t v_t^\top$-type matrix, first derivatives
+only). Two uses:
+
+1. Estimate with `analytic_grad = TRUE`, which hands the analytic score to
+   `maxLik` as `grad` (see the argument tables in Sections 3 and 4).
+2. After estimation, build the expected-information sandwich
+   $\mathcal I^{-1}(\sum_t s_t s_t^\top)\mathcal I^{-1}$ yourself. The
+   `data` argument is the data bundle used inside `fit_garch_midas()` (the
+   current fit object does not store it); rebuild it as follows:
+
+```r
+prep <- gmxdcc:::gm_prepare_data(r, X = list(JPMU = mu), K = 36, rv = FALSE,
+                                 period = "monthly", break_dates = bd)
+idx  <- gmxdcc:::gm_par_index(length(prep$lag_mats), nrow(prep$D_mat), "norm", prep$cov_names)
+dat  <- list(daily_ret = prep$returns, lag_mats = prep$lag_mats, K = prep$K,
+             D_mat = prep$D_mat, lag_fun = "Beta", distribution = "norm", idx = idx)
+th   <- fit$maxlik$estimate                       # unrounded estimates
+S    <- gm_score(th, dat)                         # T x p
+I    <- gm_expected_info(th, dat)                 # p x p
+V    <- solve(I) %*% crossprod(S) %*% solve(I)    # expected-information sandwich
+```
+
+Why it exists: the numerical Hessian is a second difference of a numerical
+gradient; for a log-likelihood of order $10^4$ its rounding noise is of
+order 3, while the true Hessian entries along the flat directions ($\omega$,
+regime increments) are themselves of order 1–10. The numerical sandwich can
+therefore jump across seeds and $H$ can fail to be positive definite. The
+expected information uses first derivatives only and carries none of that
+noise (the simulations of Fiorentini, Sentana & Calzolari, 2003, also favour
+the conditional information matrix). The defaults of `vcov()` and
+`qmle_se()` are unchanged and still use the numerical Hessian.
+
 ---
 
 ## 3. `fit_garch_midas()`
@@ -157,7 +197,8 @@ fit_garch_midas(returns, X = NULL, K = 12, rv = is.null(X), K_rv = NULL,
                 lag_fun = c("Beta", "Almon"),
                 break_dates = NULL,
                 out_of_sample = NULL, vol_proxy = NULL,
-                n_starts = 100, seed = NULL, control = list())
+                n_starts = 100, seed = NULL, control = list(),
+                analytic_grad = FALSE)
 ```
 
 ### Arguments, one by one
@@ -178,6 +219,7 @@ fit_garch_midas(returns, X = NULL, K = 12, rv = is.null(X), K_rv = NULL,
 | `n_starts` | 100 | Number of random optimizer starts (legacy `R`) |
 | `seed` | NULL | RNG seed for the start draw. **The legacy script had no seed and was irreproducible**; this is a new reproducibility guarantee |
 | `control` | list() | Optimizer overrides: `bounds` (override the constants table), `start_matrix` (start injection, Section 5), `iterlim`, `method` |
+| `analytic_grad` | FALSE | New in 0.1.2. FALSE (default) = old behaviour: `maxLik` uses its numerical gradient and every result is identical to earlier versions. TRUE = pass the analytic per-observation score `gm_score()` to `maxLik` as `grad`; the optimizer path, the stored `gradientObs` and the final Hessian (now a first difference of the analytic gradient) change accordingly. Supported for `distribution = "norm"` with any covariates (RV included), any number of regimes, Beta or Almon weights; `"std"` raises an error. Caveat: on flat likelihood surfaces the BFGS stopping point is sensitive to gradient details, so TRUE and FALSE may stop at different points (Section 5.1) |
 
 ### Canonical parameter ordering (`gm_par_index()`)
 
@@ -232,7 +274,8 @@ fit_dcc(returns,
         period = c("monthly", "quarterly"),
         out_of_sample = NULL, vol_proxy = NULL,
         n_starts = 100, seed = NULL, control = list(),
-        burn_in = c("dccmidas", "exact"))
+        burn_in = c("dccmidas", "exact"),
+        analytic_grad = FALSE)
 ```
 
 ### Arguments, one by one
@@ -249,6 +292,7 @@ fit_dcc(returns,
 | `K_c` | NULL | Correlation-side MIDAS lag order (scalar); required for DCC-MIDAS. **Keep it NULL for cDCC/aDCC/DECO** — the C++ kernels apply their own legacy default offset to NULL, and passing a value shifts the recursion start |
 | `corr_break_dates` | NULL | Break dates for the long-run correlation (piecewise $m,\theta$; form 3 in 2.2) |
 | `burn_in` | "dccmidas" | Where the correlation recursion starts (new in 0.1.1, see "Burn-in" below). The default follows the dccmidas convention and reproduces earlier results exactly; `"exact"` starts once every input of the long-run correlation is genuinely available |
+| `analytic_grad` | FALSE | New in 0.1.2. FALSE (default) = old behaviour. TRUE acts on both steps: the first step passes `gm_score()` when `univariate = "garch_midas"` (the rugarch family is unaffected); the second step passes `dcc_midas_score()` only for `correlation = "DCC-MIDAS"`, **two assets**, `rc = FALSE` and at least one `corr_X`, and otherwise falls back to the numerical gradient with one `message()`. `fit$spec$analytic_grad_used` records which steps used it |
 | others | — | Same meaning as in `fit_garch_midas()`; `control$start_matrix` targets **the second step only** (columns in `dcc_par_index()` order) |
 
 ### Second-step parameter ordering (`dcc_par_index()`)
@@ -338,6 +382,19 @@ legacy scheme: draw `n_starts` candidate start vectors → evaluate the summed
 log-likelihood at each → run **one** constrained BFGS from the best candidate.
 Random parameters are drawn uniformly from the ranges below; fixed parameters
 (the $\omega$ weights, the mean $\mu$) take fixed start values.
+
+**Gradient source (0.1.2).** By default `maxLik` uses a central-difference
+numerical gradient (step 1e-6). With `analytic_grad = TRUE` the analytic
+per-observation score is passed instead (internally
+`run_multistart(..., grad_fn = )`). The two gradients agree component by
+component (test tolerance 1e-4), but BFGS stops early on the flat ridge
+spanned by $\omega$ and the regime increments, and the stopping point is
+sensitive to gradient details: from the same start the two gradients may stop
+at points whose log-likelihoods differ by 0.01–0.1 and whose $\omega$ or
+$\theta$ differ visibly. `analytic_grad = TRUE` is therefore not "a more
+precise version of the same answer" but another route onto the flat ridge;
+for production estimates keep the multistart and multi-seed protocol and
+compare the stopping points' likelihoods.
 
 ### 5.2 Constants tables (overridable via `control$bounds`)
 
@@ -451,6 +508,19 @@ $$\mathrm{MSE\%} = 100\cdot\overline{(h - h^{proxy})^2},\qquad \mathrm{QLIKE} = 
 ### `qmle_se(est)` / `inf_criteria(est)` / `inf_criteria_2step(res_garch, res_dcc)`
 Sandwich standard errors (formula in 2.3), single-model AIC/BIC, and two-step
 system AIC/BIC ($k$ and the likelihood summed over both steps).
+
+### `gm_score(param, data)` / `gm_expected_info(param, data)` (new in 0.1.2)
+Analytic per-observation score ($T\times p$, parameters in `gm_par_index()`
+order) and expected information matrix ($p\times p$) of the first-step
+likelihood. `data` is the bundle used inside `fit_garch_midas()` (see the
+example in 2.3 for how to rebuild it). `distribution = "norm"` only.
+
+### `dcc_midas_score(param, data)` / `dcc_expected_info(param, data)` (new in 0.1.2)
+The same for the DCC-MIDAS correlation step. Two assets, `rc = FALSE` and at
+least one exogenous covariate only; `data` is the same bundle as for
+`dcc_midas_loglik()` (`res`, `n_assets`, `TT`, `K_c`, `X_mats`, `D_mat`,
+`lag_fun`, `idx`). Rows before the recursion start are zero, matching the zero
+rows of `dcc_midas_loglik()`.
 
 ---
 

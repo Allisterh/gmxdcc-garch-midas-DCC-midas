@@ -116,6 +116,25 @@ $$\widehat{\mathrm{Var}}(\hat\vartheta) = H^{-1} \Big(\textstyle\sum_t s_t s_t^\
 
 $H$ 为数值 Hessian,$s_t$ 为逐观测得分(由 `maxLik` 的 `gradientObs` 提供)。GARCH 类模型创新分布几乎必然误设,故不使用普通 Hessian 标准误(Bollerslev & Wooldridge, 1992)。
 
+**解析得分与期望信息(0.1.2 新增,可选)。** 两步似然的逐观测得分都有封闭递推式(Fiorentini, Calzolari & Panattoni, 1996 的单变量 GARCH 递推,加上长期成分 $\tau_t$ 对 $(m,\theta,\omega)$ 的封闭导数;相关步按 Engle (2002) 的 $Q_t$ 递推求导)。包把它们导出为 `gm_score()`、`dcc_midas_score()`(返回 $T\times p$ 得分矩阵)与 `gm_expected_info()`、`dcc_expected_info()`(返回期望信息矩阵 $\mathcal I=\sum_t \tfrac12 v_t v_t^\top$ 型,只用一阶导数)。用法有两种:
+
+1. 估计时 `analytic_grad = TRUE`,把解析得分作为 `maxLik` 的 `grad`(见第 3、4 节的参数表)。
+2. 估计后自己算期望信息三明治 $\mathcal I^{-1}(\sum_t s_t s_t^\top)\mathcal I^{-1}$。得分函数的 `data` 是 `fit_garch_midas()` 内部用的数据束(当前版本的拟合对象不保存它),按下面方式重建:
+
+```r
+prep <- gmxdcc:::gm_prepare_data(r, X = list(JPMU = mu), K = 36, rv = FALSE,
+                                 period = "monthly", break_dates = bd)
+idx  <- gmxdcc:::gm_par_index(length(prep$lag_mats), nrow(prep$D_mat), "norm", prep$cov_names)
+dat  <- list(daily_ret = prep$returns, lag_mats = prep$lag_mats, K = prep$K,
+             D_mat = prep$D_mat, lag_fun = "Beta", distribution = "norm", idx = idx)
+th   <- fit$maxlik$estimate                       # 未舍入的估计值
+S    <- gm_score(th, dat)                         # T x p
+I    <- gm_expected_info(th, dat)                 # p x p
+V    <- solve(I) %*% crossprod(S) %*% solve(I)    # 期望信息三明治
+```
+
+为什么要有它:数值 Hessian 是数值梯度的二阶差分,对量级 $10^4$ 的似然舍入噪声约为 3;在 $\omega$ 与区间增量这些平坦方向上真实 Hessian 元素本身只有 1–10,所以数值三明治 SE 可能跨种子跳动、$H$ 可能非正定。期望信息只用一阶导数,没有这层噪声(Fiorentini, Sentana & Calzolari, 2003 的模拟也支持用条件信息矩阵)。`vcov()` 与 `qmle_se()` 的默认行为不变,仍是数值 Hessian 版。
+
 ---
 
 ## 3. `fit_garch_midas()`
@@ -127,7 +146,8 @@ fit_garch_midas(returns, X = NULL, K = 12, rv = is.null(X), K_rv = NULL,
                 lag_fun = c("Beta", "Almon"),
                 break_dates = NULL,
                 out_of_sample = NULL, vol_proxy = NULL,
-                n_starts = 100, seed = NULL, control = list())
+                n_starts = 100, seed = NULL, control = list(),
+                analytic_grad = FALSE)
 ```
 
 ### 参数逐一解说
@@ -148,6 +168,7 @@ fit_garch_midas(returns, X = NULL, K = 12, rv = is.null(X), K_rv = NULL,
 | `n_starts` | 100 | 随机起点个数(对应旧脚本的 `R`) |
 | `seed` | NULL | 随机起点种子。**旧脚本无种子、结果不可复现**;设种子是新增的可复现性保障 |
 | `control` | list() | 优化覆盖项:`bounds`(覆盖初值区间/约束常数表)、`start_matrix`(注入起点,见第 5 节)、`iterlim`、`method` |
+| `analytic_grad` | FALSE | 0.1.2 新增。FALSE(默认)= 旧行为,`maxLik` 用数值梯度,结果与旧版逐位相同。TRUE = 把解析逐观测得分 `gm_score()` 作为 `grad` 传给 `maxLik`;优化路径、存下的 `gradientObs` 与最终 Hessian(变成解析梯度的一阶差分)随之改变。支持 `distribution = "norm"` 下任意协变量(含 RV)、任意区间数、Beta 或 Almon 权重;`"std"` 报错。注意:在平坦似然面上 BFGS 的停点对梯度细节敏感,TRUE 与 FALSE 可能停在不同的点(见 5.1 节) |
 
 ### 参数向量的规范排序(`gm_par_index()`)
 
@@ -202,7 +223,8 @@ fit_dcc(returns,
         period = c("monthly", "quarterly"),
         out_of_sample = NULL, vol_proxy = NULL,
         n_starts = 100, seed = NULL, control = list(),
-        burn_in = c("dccmidas", "exact"))
+        burn_in = c("dccmidas", "exact"),
+        analytic_grad = FALSE)
 ```
 
 ### 参数逐一解说
@@ -219,6 +241,7 @@ fit_dcc(returns,
 | `K_c` | NULL | 相关侧 MIDAS 滞后阶数(标量);DCC-MIDAS 必填。**cDCC/aDCC/DECO 请保持 NULL**——C++ 内核对 NULL 有自己的旧默认偏移,显式传值会移动递推起点 |
 | `corr_break_dates` | NULL | 长期相关的突变日期(分段 $m,\theta$;见 2.2 第 3 式) |
 | `burn_in` | "dccmidas" | 相关递推从哪天开始(0.1.1 新增,见下方"烧入期"小节)。默认沿用 dccmidas 包约定,数值与旧版完全一致;`"exact"` 在长期相关的全部输入真正可用时才开始 |
+| `analytic_grad` | FALSE | 0.1.2 新增。FALSE(默认)= 旧行为。TRUE 同时作用于两步:第一步 `univariate = "garch_midas"` 时传 `gm_score()`(rugarch 族不受影响);第二步只在 `correlation = "DCC-MIDAS"`、**两个资产**、`rc = FALSE`、至少一个 `corr_X` 时传 `dcc_midas_score()`,其他情形第二步回退数值梯度并 `message()` 一次。实际用了哪一步见 `fit$spec$analytic_grad_used` |
 | 其余 | — | 与 `fit_garch_midas()` 同义;`control$start_matrix` **只作用于第二步**(列序按 `dcc_par_index()`) |
 
 ### 第二步参数排序(`dcc_par_index()`,与旧脚本各配置逐一吻合)
@@ -291,6 +314,8 @@ plot(xts::xts(dcc$R_t[1, 2, ], order.by = dcc$Days))
 ### 5.1 多起点机制
 
 似然面多峰(尤其含突变时)。沿袭旧脚本方案:抽 `n_starts` 个候选起点 → 逐一算总似然 → 从最优者出发做**一次**带约束 BFGS。随机参数按下表区间均匀抽取,固定参数(权重 $\omega$、均值 $\mu$)取固定初值。
+
+**梯度来源(0.1.2)。** 默认 `maxLik` 用中心差分数值梯度(步长 1e-6)。`analytic_grad = TRUE` 时改传解析逐观测得分(内部 `run_multistart(..., grad_fn = )`)。两者在得分上逐分量一致(测试容差 1e-4),但 BFGS 在 $\omega$ 与区间增量方向的平坦脊上会提前停,停点对梯度的细节敏感:同一起点下两种梯度可能停在似然相差 0.01–0.1、$\omega$ 或 $\theta$ 相差明显的两个点上。因此 `analytic_grad = TRUE` 不是"同一答案的更准版本",而是另一条到达平坦脊的路;要用它做正式估计,仍应配合多起点、多种子,并比较停点的似然。
 
 ### 5.2 常数表(可经 `control$bounds` 覆盖)
 
@@ -379,6 +404,12 @@ $$\mathrm{MSE\%} = 100\cdot\overline{(h - h^{proxy})^2},\qquad \mathrm{QLIKE} = 
 
 ### `qmle_se(est)` / `inf_criteria(est)` / `inf_criteria_2step(res_garch, res_dcc)`
 三明治标准误(2.3 节公式)、单模型 AIC/BIC、两步系统 AIC/BIC($k$ 与似然按两步加总)。
+
+### `gm_score(param, data)` / `gm_expected_info(param, data)`(0.1.2 新增)
+第一步似然的解析逐观测得分($T\times p$,参数顺序同 `gm_par_index()`)与期望信息矩阵($p\times p$)。`data` 是 `fit_garch_midas()` 内部的数据束(重建方式见 2.3 节示例)。只支持 `distribution = "norm"`。
+
+### `dcc_midas_score(param, data)` / `dcc_expected_info(param, data)`(0.1.2 新增)
+DCC-MIDAS 相关步的解析逐观测得分与期望信息。只支持两个资产、`rc = FALSE`、至少一个外生协变量;`data` 与 `dcc_midas_loglik()` 的数据束相同(`res`、`n_assets`、`TT`、`K_c`、`X_mats`、`D_mat`、`lag_fun`、`idx`);得分矩阵中递推起点之前的行为 0,与 `dcc_midas_loglik()` 的零值行一致。
 
 ---
 

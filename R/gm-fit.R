@@ -128,6 +128,16 @@ gm_prepare_data <- function(returns, X = NULL, K = 12, rv = is.null(X),
 #' @param seed Optional RNG seed for reproducible starts.
 #' @param control List of optimizer overrides: `bounds`, `start_matrix`,
 #'   `iterlim`, `method`.
+#' @param analytic_grad Logical. `FALSE` (default) keeps the original
+#'   behavior: `maxLik` uses its numerical gradient, results are identical
+#'   to earlier versions. `TRUE` passes the analytic per-observation score
+#'   [gm_score()] to `maxLik` as `grad`; the optimizer path, the stored
+#'   `gradientObs` and the numerical Hessian (now a difference of the
+#'   analytic gradient) change accordingly. Available for
+#'   `distribution = "norm"` (any covariates, breaks, Beta or Almon
+#'   weights); an error is raised for `"std"`.
+#'   默认 FALSE 保持原行为;TRUE 时把解析得分 gm_score 作为 grad 传给
+#'   maxLik(只支持正态分布)。
 #'
 #' @return An object of class `gm_fit`; see [summary.gm_fit()].
 #' @examples
@@ -152,10 +162,18 @@ fit_garch_midas <- function(returns, X = NULL, K = 12, rv = is.null(X),
                             lag_fun = c("Beta", "Almon"),
                             break_dates = NULL,
                             out_of_sample = NULL, vol_proxy = NULL,
-                            n_starts = 100, seed = NULL, control = list()) {
+                            n_starts = 100, seed = NULL, control = list(),
+                            analytic_grad = FALSE) {
   period       <- match.arg(period)
   distribution <- match.arg(distribution)
   lag_fun      <- match.arg(lag_fun)
+  if (!is.logical(analytic_grad) || length(analytic_grad) != 1L || is.na(analytic_grad)) {
+    stop("analytic_grad must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (analytic_grad && distribution != "norm") {
+    stop("analytic_grad = TRUE is available for distribution = \"norm\" only.",
+         call. = FALSE)
+  }
 
   prep <- gm_prepare_data(returns, X = X, K = K, rv = rv, K_rv = K_rv,
                           period = period, break_dates = break_dates,
@@ -193,8 +211,15 @@ fit_garch_midas <- function(returns, X = NULL, K = 12, rv = is.null(X),
     mu_start = mean(data_in$daily_ret, na.rm = TRUE),
     bounds = control$bounds %||% list()
   )
+  if (!analytic_grad) {
   opt <- run_multistart(gm_loglik, data_in, spec,
                         n_starts = n_starts, seed = seed, control = control)
+  } else {
+    # Analytic score as the maxLik gradient / 解析得分作为 maxLik 梯度
+    opt <- run_multistart(gm_loglik, data_in, spec,
+                          n_starts = n_starts, seed = seed, control = control,
+                          grad_fn = gm_score)
+  }
   est      <- opt$est
   est_coef <- stats::coef(est)
   mat_coef <- qmle_coeftable(est)
@@ -227,7 +252,8 @@ fit_garch_midas <- function(returns, X = NULL, K = 12, rv = is.null(X),
     # metadata / 元数据
     spec = list(cov_names = prep$cov_names, K = prep$K, period = period,
                 distribution = distribution, lag_fun = lag_fun,
-                break_dates = break_dates, n_starts = n_starts, seed = seed),
+                break_dates = break_dates, n_starts = n_starts, seed = seed,
+                analytic_grad = analytic_grad),
     maxlik = est
   )
 

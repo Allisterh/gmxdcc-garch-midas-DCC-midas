@@ -21,12 +21,17 @@
 #' @param control List; recognized fields: `start_matrix` (fixed candidate
 #'   matrix in canonical parameter order), `iterlim` (default 1000),
 #'   `method` (default `"BFGS"`).
+#' @param grad_fn Optional analytic gradient, called as
+#'   `grad_fn(param, data)` and returning the per-observation score matrix
+#'   (e.g. [gm_score()], [dcc_midas_score()]); passed to `maxLik` as `grad`.
+#'   `NULL` (default) leaves the `maxLik` call exactly as before (numerical
+#'   gradient). 可选解析梯度;NULL(默认)时 maxLik 调用与原来完全相同。
 #'
 #' @return List with `est` (the `maxLik` object), `start_matrix`, and
 #'   `start_used` (the selected start vector).
 #' @keywords internal
 run_multistart <- function(loglik_fn, data, spec, n_starts = 100,
-                           seed = NULL, control = list()) {
+                           seed = NULL, control = list(), grad_fn = NULL) {
 
   begin_val <- control$start_matrix
   if (is.null(begin_val)) {
@@ -74,6 +79,7 @@ run_multistart <- function(loglik_fn, data, spec, n_starts = 100,
 
   # Single constrained BFGS run from the best start (legacy behavior).
   # 由最优候选出发的单次带约束 BFGS(与旧脚本一致)。
+  if (is.null(grad_fn)) {
   est <- suppressWarnings(maxLik::maxLik(
     logLik = loglik_fn,
     start  = start_val,
@@ -82,6 +88,19 @@ run_multistart <- function(loglik_fn, data, spec, n_starts = 100,
     iterlim = control$iterlim %||% 1000,
     method  = control$method %||% "BFGS"
   ))
+  } else {
+    # Same call plus the analytic per-observation score as `grad`
+    # 同一调用,另把解析逐观测得分作为 grad 传入
+    est <- suppressWarnings(maxLik::maxLik(
+      logLik = loglik_fn,
+      grad   = grad_fn,
+      start  = start_val,
+      data   = data,
+      constraints = list(ineqA = spec$ui, ineqB = spec$ci),
+      iterlim = control$iterlim %||% 1000,
+      method  = control$method %||% "BFGS"
+    ))
+  }
 
   list(est = est, start_matrix = begin_val, start_used = start_val)
 }

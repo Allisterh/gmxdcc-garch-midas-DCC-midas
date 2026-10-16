@@ -22,7 +22,8 @@ fit_dcc(
   n_starts = 100,
   seed = NULL,
   control = list(),
-  burn_in = c("dccmidas", "exact")
+  burn_in = c("dccmidas", "exact"),
+  analytic_grad = FALSE
 )
 }
 \arguments{
@@ -74,6 +75,21 @@ calendar alignment, and \code{K_c} counts months there, not days).
 相关递推起点:"dccmidas"(默认,与 dccmidas 包及旧脚本一致)前 K_c 天
 为占位;"exact" 在长期相关全部输入真正可用时才开始(含 RC 时跳过
 N_c+K_c 天,否则只跳 1 天)。}
+
+\item{analytic_grad}{Logical. \code{FALSE} (default) keeps the original
+behavior: both steps use the numerical gradient of \code{maxLik}, results
+are identical to earlier versions. \code{TRUE} passes analytic
+per-observation scores to \code{maxLik} as \code{grad}: \code{\link[=gm_score]{gm_score()}} in the first
+step when \code{univariate = "garch_midas"} (Gaussian innovations only), and
+\code{\link[=dcc_midas_score]{dcc_midas_score()}} in the second step when \code{correlation = "DCC-MIDAS"}
+with two assets and exogenous covariates only (\code{rc = FALSE}). For other
+correlation models (cDCC/aDCC/DECO), more than two assets, or \code{rc = TRUE}, the second step falls back to the numerical gradient and a
+message is shown once; rugarch first steps are unaffected. The
+requested value is stored in \code{fit$spec$analytic_grad}, the steps that
+actually used it in \code{fit$spec$analytic_grad_used}.
+默认 FALSE 保持原行为;TRUE 时第一步(garch_midas)用 gm_score,
+第二步(二元、rc = FALSE 的 DCC-MIDAS)用 dcc_midas_score;其余相关
+模型第二步回退数值梯度并提示一次。}
 }
 \value{
 An object of class \code{dcc_fit}; see \code{\link[=summary.dcc_fit]{summary.dcc_fit()}}. The

@@ -10,7 +10,8 @@ run_multistart(
   spec,
   n_starts = 100,
   seed = NULL,
-  control = list()
+  control = list(),
+  grad_fn = NULL
 )
 }
 \arguments{
@@ -29,6 +30,12 @@ analogue): supplies names, start ranges and \code{ui}/\code{ci} constraints.}
 \item{control}{List; recognized fields: \code{start_matrix} (fixed candidate
 matrix in canonical parameter order), \code{iterlim} (default 1000),
 \code{method} (default \code{"BFGS"}).}
+
+\item{grad_fn}{Optional analytic gradient, called as
+\code{grad_fn(param, data)} and returning the per-observation score matrix
+(e.g. \code{\link[=gm_score]{gm_score()}}, \code{\link[=dcc_midas_score]{dcc_midas_score()}}); passed to \code{maxLik} as \code{grad}.
+\code{NULL} (default) leaves the \code{maxLik} call exactly as before (numerical
+gradient). 可选解析梯度;NULL(默认)时 maxLik 调用与原来完全相同。}
 }
 \value{
 List with \code{est} (the \code{maxLik} object), \code{start_matrix}, and

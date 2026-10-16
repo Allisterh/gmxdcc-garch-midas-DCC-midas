@@ -20,13 +20,17 @@
 #'   volatility with full history.
 #' @param period,lag_fun,n_starts,seed,control Passed to [fit_garch_midas()].
 #' @param vol_proxy Optional multivariate variance proxy.
+#' @param analytic_grad Passed to [fit_garch_midas()] on the `garch_midas`
+#'   path (ignored for the rugarch family). Default `FALSE` = original
+#'   behavior. garch_midas 路径传给 fit_garch_midas;rugarch 路径忽略。
 #'
 #' @return List with `u_est`, `est_details`, `u_loglik`, `u_inf`, `sd_full`
 #'   (TT x N matrix), `db_demeaned` (TT x N matrix).
 #' @keywords internal
 univ_stage <- function(r_al, univariate, distribution, out_of_sample,
                        univariate_args, r_full, period, lag_fun,
-                       n_starts, seed, control, vol_proxy = NULL) {
+                       n_starts, seed, control, vol_proxy = NULL,
+                       analytic_grad = FALSE) {
 
   N_assets <- ncol(r_al)
   TT   <- nrow(r_al)
@@ -76,7 +80,8 @@ univ_stage <- function(r_al, univariate, distribution, out_of_sample,
         break_dates = ua$break_dates,
         out_of_sample = out_of_sample,
         vol_proxy = if (!is.null(vol_proxy)) vol_proxy[, i] else NULL,
-        n_starts = n_starts, seed = seed, control = ctrl_i
+        n_starts = n_starts, seed = seed, control = ctrl_i,
+        analytic_grad = analytic_grad
       )
 
       est_details[[i]] <- u_est[[i]]$rob_coef_mat
@@ -183,6 +188,21 @@ univ_stage <- function(r_al, univariate, distribution, out_of_sample,
 #'   相关递推起点:"dccmidas"(默认,与 dccmidas 包及旧脚本一致)前 K_c 天
 #'   为占位;"exact" 在长期相关全部输入真正可用时才开始(含 RC 时跳过
 #'   N_c+K_c 天,否则只跳 1 天)。
+#' @param analytic_grad Logical. `FALSE` (default) keeps the original
+#'   behavior: both steps use the numerical gradient of `maxLik`, results
+#'   are identical to earlier versions. `TRUE` passes analytic
+#'   per-observation scores to `maxLik` as `grad`: [gm_score()] in the first
+#'   step when `univariate = "garch_midas"` (Gaussian innovations only), and
+#'   [dcc_midas_score()] in the second step when `correlation = "DCC-MIDAS"`
+#'   with two assets and exogenous covariates only (`rc = FALSE`). For other
+#'   correlation models (cDCC/aDCC/DECO), more than two assets, or `rc =
+#'   TRUE`, the second step falls back to the numerical gradient and a
+#'   message is shown once; rugarch first steps are unaffected. The
+#'   requested value is stored in `fit$spec$analytic_grad`, the steps that
+#'   actually used it in `fit$spec$analytic_grad_used`.
+#'   默认 FALSE 保持原行为;TRUE 时第一步(garch_midas)用 gm_score,
+#'   第二步(二元、rc = FALSE 的 DCC-MIDAS)用 dcc_midas_score;其余相关
+#'   模型第二步回退数值梯度并提示一次。
 #'
 #' @return An object of class `dcc_fit`; see [summary.dcc_fit()]. The
 #'   integer field `burn_in` gives the number of leading in-sample days whose
@@ -220,7 +240,8 @@ fit_dcc <- function(returns,
                     period = c("monthly", "quarterly"),
                     out_of_sample = NULL, vol_proxy = NULL,
                     n_starts = 100, seed = NULL, control = list(),
-                    burn_in = c("dccmidas", "exact")) {
+                    burn_in = c("dccmidas", "exact"),
+                    analytic_grad = FALSE) {
 
   univariate   <- match.arg(univariate)
   correlation  <- match.arg(correlation)
@@ -228,6 +249,9 @@ fit_dcc <- function(returns,
   lag_fun      <- match.arg(lag_fun)
   period       <- match.arg(period)
   burn_in      <- match.arg(burn_in)
+  if (!is.logical(analytic_grad) || length(analytic_grad) != 1L || is.na(analytic_grad)) {
+    stop("analytic_grad must be TRUE or FALSE.", call. = FALSE)
+  }
 
   ############################# validation / 输入校验
   assert_xts(returns)
@@ -328,6 +352,19 @@ fit_dcc <- function(returns,
                  burn_in, t0, n_in), call. = FALSE)
   }
 
+  ############################# analytic gradient scope / 解析梯度适用范围
+  # First step: garch_midas path only (rugarch has its own optimizer).
+  # Second step: bivariate DCC-MIDAS with exogenous covariates only.
+  # 第一步只作用于 garch_midas 路径;第二步只作用于二元、rc = FALSE 的 DCC-MIDAS。
+  ag_univ <- analytic_grad && univariate == "garch_midas"
+  ag_corr <- analytic_grad && is_midas_corr && N_a == 2L && !has_rc &&
+    length(corr_X) >= 1L
+  if (analytic_grad && !ag_corr) {
+    message("analytic_grad: the correlation step uses the numerical gradient ",
+            "(analytic gradient is available for two assets, exogenous covariates ",
+            "only (rc = FALSE), correlation = \"DCC-MIDAS\").")
+  }
+
   ############################# first step / 第一步:单变量
   # control$start_matrix targets the SECOND (correlation) step only: its
   # columns follow dcc_par_index() and would not match the univariate
@@ -341,7 +378,8 @@ fit_dcc <- function(returns,
   st1 <- univ_stage(r_al, univariate, distribution, out_of_sample,
                     univariate_args, r_full = returns, period = period,
                     lag_fun = lag_fun, n_starts = n_starts, seed = seed,
-                    control = control_univ, vol_proxy = vol_proxy)
+                    control = control_univ, vol_proxy = vol_proxy,
+                    analytic_grad = ag_univ)
 
   # Standardized residuals and D_t cubes over the full sample
   # 全样本标准化残差与条件标准差对角阵
@@ -404,9 +442,17 @@ fit_dcc <- function(returns,
                            X_names = names(corr_X) %||% character(0),
                            bounds = control$bounds %||% list())
     dc_in <- dcc_bundle(seq_len(n_in), idx = spec$idx)
+    if (!ag_corr) {
     opt <- run_multistart(dcc_midas_loglik, dc_in, spec,
                           n_starts = if (spec$single_start) 1 else n_starts,
                           seed = seed, control = control)
+    } else {
+      # Analytic score as the maxLik gradient / 解析得分作为 maxLik 梯度
+      opt <- run_multistart(dcc_midas_loglik, dc_in, spec,
+                            n_starts = if (spec$single_start) 1 else n_starts,
+                            seed = seed, control = control,
+                            grad_fn = dcc_midas_score)
+    }
     m_est <- opt$est
   }
 
@@ -459,7 +505,9 @@ fit_dcc <- function(returns,
                 corr_break_dates = corr_break_dates,
                 distribution = distribution, lag_fun = lag_fun,
                 period = period, n_starts = n_starts, seed = seed,
-                burn_in = burn_in),
+                burn_in = burn_in, analytic_grad = analytic_grad,
+                analytic_grad_used = c(univariate = ag_univ,
+                                       correlation = ag_corr)),
     maxlik = m_est
   )
 

@@ -1,3 +1,35 @@
+# gmxdcc 0.1.2
+
+* New optional analytic gradients. **Default behavior is unchanged**: with
+  `analytic_grad = FALSE` (the default) every estimate, log-likelihood,
+  standard error and output field other than the two new `spec` entries
+  is identical to 0.1.1.
+  - New exported functions `gm_score()` / `gm_expected_info()`: analytic
+    per-observation score and expected information matrix of the Gaussian
+    GARCH-MIDAS quasi-likelihood (any number of covariates including
+    realized volatility, any number of regimes, Beta or Almon weights;
+    `distribution = "std"` is not supported and raises an error).
+  - New exported functions `dcc_midas_score()` / `dcc_expected_info()`:
+    the same for the DCC-MIDAS correlation step, for two assets with
+    exogenous covariates only (`rc = FALSE`), with or without breaks. The
+    recursion starts where `dcc_midas_loglik()` starts it (`burn_in`
+    option respected); rows before the start are zero.
+  - New argument `analytic_grad = FALSE` (last position) of
+    `fit_garch_midas()` and `fit_dcc()`. `TRUE` passes the analytic score
+    to `maxLik` as `grad`. In `fit_dcc()` it acts on the first step
+    (`univariate = "garch_midas"`) and on the second step (bivariate
+    DCC-MIDAS, `rc = FALSE`); other correlation models, more than two
+    assets or `rc = TRUE` fall back to the numerical gradient in the second
+    step with a one-time message. With `TRUE`, `gradientObs` and the
+    numerical Hessian (a difference of the analytic gradient) also change,
+    so robust standard errors differ slightly from the default fit.
+  - The choice is recorded in `fit$spec$analytic_grad`; `fit_dcc()` also
+    stores `fit$spec$analytic_grad_used` (which steps actually used it).
+  - Internal: `run_multistart()` gains `grad_fn = NULL` (last position);
+    with `NULL` the `maxLik` call is the same as before.
+* No change to the C++ kernels, the likelihoods, the start-value draw, or
+  the constraints.
+
 # gmxdcc 0.1.1
 
 * New `burn_in` argument of `fit_dcc()` controlling where the correlation

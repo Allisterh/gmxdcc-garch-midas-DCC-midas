@@ -18,7 +18,8 @@ fit_garch_midas(
   vol_proxy = NULL,
   n_starts = 100,
   seed = NULL,
-  control = list()
+  control = list(),
+  analytic_grad = FALSE
 )
 }
 \arguments{
@@ -57,6 +58,17 @@ evaluation (default: squared returns).}
 
 \item{control}{List of optimizer overrides: \code{bounds}, \code{start_matrix},
 \code{iterlim}, \code{method}.}
+
+\item{analytic_grad}{Logical. \code{FALSE} (default) keeps the original
+behavior: \code{maxLik} uses its numerical gradient, results are identical
+to earlier versions. \code{TRUE} passes the analytic per-observation score
+\code{\link[=gm_score]{gm_score()}} to \code{maxLik} as \code{grad}; the optimizer path, the stored
+\code{gradientObs} and the numerical Hessian (now a difference of the
+analytic gradient) change accordingly. Available for
+\code{distribution = "norm"} (any covariates, breaks, Beta or Almon
+weights); an error is raised for \code{"std"}.
+默认 FALSE 保持原行为;TRUE 时把解析得分 gm_score 作为 grad 传给
+maxLik(只支持正态分布)。}
 }
 \value{
 An object of class \code{gm_fit}; see \code{\link[=summary.gm_fit]{summary.gm_fit()}}.

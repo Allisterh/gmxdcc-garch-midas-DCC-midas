@@ -28,6 +28,14 @@ GARCH-MIDAS 与 DCC-MIDAS 模型的 R 实现:任意个数低频宏观协变量�
   sample with frozen in-sample parameters — warm-started from the last
   in-sample state, with in-sample unconditional targets (no look-ahead).
 - **Reproducibility**: the random multi-start optimizer accepts a `seed`.
+- **Analytic gradients (optional, 0.1.2)**: `fit_garch_midas()` and
+  `fit_dcc()` accept `analytic_grad = TRUE`, which passes the analytic
+  per-observation score to `maxLik` instead of its numerical gradient. The
+  score and expected-information functions are exported (`gm_score()`,
+  `gm_expected_info()`, `dcc_midas_score()`, `dcc_expected_info()`) so an
+  expected-information sandwich can be computed by hand. The default
+  (`FALSE`) leaves every estimate identical to earlier versions.
+  可选解析梯度(默认关闭,关闭时结果与旧版逐位相同)。
 
 ## Installation
 
@@ -92,9 +100,9 @@ languages:
 - 中文: [docs/gmxdcc-manual.md](docs/gmxdcc-manual.md)
 
 Upgrading an existing project? See
-[docs/upgrade-notes.md](docs/upgrade-notes.md) (0.1.0 → 0.1.1: no code
-changes needed; how to drop placeholder burn-in days; how to pin the old
-version).
+[docs/upgrade-notes.md](docs/upgrade-notes.md) (0.1.0 → 0.1.1 → 0.1.2: no
+code changes needed; how to drop placeholder burn-in days; what
+`analytic_grad = TRUE` does and does not change; how to pin an old version).
 
 ## Migrating from the legacy research script
 

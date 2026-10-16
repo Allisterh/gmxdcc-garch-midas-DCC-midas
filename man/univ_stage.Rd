@@ -16,7 +16,8 @@ univ_stage(
   n_starts,
   seed,
   control,
-  vol_proxy = NULL
+  vol_proxy = NULL,
+  analytic_grad = FALSE
 )
 }
 \arguments{
@@ -40,6 +41,10 @@ volatility with full history.}
 \item{period, lag_fun, n_starts, seed, control}{Passed to \code{\link[=fit_garch_midas]{fit_garch_midas()}}.}
 
 \item{vol_proxy}{Optional multivariate variance proxy.}
+
+\item{analytic_grad}{Passed to \code{\link[=fit_garch_midas]{fit_garch_midas()}} on the \code{garch_midas}
+path (ignored for the rugarch family). Default \code{FALSE} = original
+behavior. garch_midas 路径传给 fit_garch_midas;rugarch 路径忽略。}
 }
 \value{
 List with \code{u_est}, \code{est_details}, \code{u_loglik}, \code{u_inf}, \code{sd_full}
